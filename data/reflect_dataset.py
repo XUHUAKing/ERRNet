@@ -7,6 +7,8 @@ from glob import glob
 import random
 import torch
 import math
+import numpy as np
+import scipy.misc
 
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
@@ -218,14 +220,27 @@ class MyDataset(BaseDataset):
 
         m_img = np.load(fn)[0,:,:,-1]# (1024, 1224) H*W
         r_img = np.load(r_name)[0,:,:,-1]# (1024, 1224) H*W
+        tmp_mask=scipy.misc.imread(mask,'L')[::2,::2, np.newaxis]/255.
         t_img = m_img - r_img
-        # convert to PIL image
-        m_img = Image.fromarray(m_img.astype('uint8'), 'RGB')
-        t_img = Image.fromarray(t_img.astype('uint8'), 'RGB')
 
+        m_img = m_img[:,:,np.newaxis]
+        t_img = t_img[:,:,np.newaxis]
+        # scale back to 255
+        m_img = ((m_img - m_img.min()) / (m_img.max() - m_img.min())) * 255
+        t_img = ((t_img - t_img.min()) / (t_img.max() - t_img.min())) * 255
+        # crop valid region
+        m_img = m_img * tmp_mask
+        t_img = t_img * tmp_mask
+        # change to 3 channel
+        m_img = np.tile(m_img,[1,1,3])
+        t_img = np.tile(t_img,[1,1,3])
+        # convert to PIL image
+        m_img = Image.fromarray(m_img.astype(np.uint8))
+        t_img = Image.fromarray(t_img.astype(np.uint8))
 
         if self.enable_transforms:
-            t_img, m_img = paired_data_transforms(t_img, m_img, self.unaligned_transforms)
+            # t_img, m_img = paired_data_transforms(t_img, m_img, self.unaligned_transforms)
+            t_img, m_img = paired_data_transforms(t_img, m_img, True)
 
         B = to_tensor(t_img)
         M = to_tensor(m_img)

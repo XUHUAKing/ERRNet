@@ -26,10 +26,12 @@ if opt.debug:
     opt.no_flip = True
 
 # modify the following code to your datadir
-datadir = '/media/kaixuan/DATA/Papers/Code/Data/Reflection/'
+# datadir = '/media/kaixuan/DATA/Papers/Code/Data/Reflection/'
+datadir = '/home/mengdi/disk1/reflection_removal/data_new/data_all_0609/20190609/Indoor'
 
 datadir_syn = join(datadir, 'VOCdevkit/VOC2012/PNGImages')
-datadir_real = join(datadir, 'real_train')
+# datadir_real = join(datadir, 'real_train')
+datadir_real = join(datadir, '1')
 
 train_dataset = datasets.CEILDataset(
     datadir_syn, read_fns('VOC2012_224_train_png.txt'), size=opt.max_dataset_size, enable_transforms=True,
@@ -40,6 +42,7 @@ train_dataset = datasets.CEILDataset(
 train_dataset_real = datasets.MyDataset(datadir_real, enable_transforms=True)
 
 train_dataset_fusion = datasets.FusionDataset([train_dataset, train_dataset_real], [0.7, 0.3])
+# train_dataset_fusion = datasets.FusionDataset([train_dataset_real], [1.0])
 
 train_dataloader_fusion = datasets.DataLoader(
     train_dataset_fusion, batch_size=opt.batchSize, shuffle=not opt.serial_batches,
@@ -91,6 +94,7 @@ while engine.epoch < 60:
         set_learning_rate(1e-5)
 
     engine.train(train_dataloader_fusion)
+    # train_dataset_fusion[0]
 
     # if engine.epoch % 5 == 0:
     #     engine.eval(eval_dataloader_ceilnet, dataset_name='testdata_table2')
