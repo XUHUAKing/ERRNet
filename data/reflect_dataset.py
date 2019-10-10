@@ -3,6 +3,7 @@ from os.path import join
 from data.image_folder import make_dataset
 from data.transforms import Sobel, to_norm_tensor, to_tensor, ReflectionSythesis_1, ReflectionSythesis_2
 from PIL import Image
+from glob import glob
 import random
 import torch
 import math
@@ -43,7 +44,7 @@ def paired_data_transforms(img_1, img_2, unaligned_transforms=False):
         i = random.randint(0, h - th)
         j = random.randint(0, w - tw)
         return i, j, th, tw
-    
+
     # target_size = int(random.randint(224+10, 448) / 2.) * 2
     target_size = int(random.randint(224, 448) / 2.) * 2
     # target_size = int(random.randint(256, 480) / 2.) * 2
@@ -62,7 +63,7 @@ def paired_data_transforms(img_1, img_2, unaligned_transforms=False):
     i, j, h, w = get_params(img_1, (224,224))
     # i, j, h, w = get_params(img_1, (256,256))
     img_1 = F.crop(img_1, i, j, h, w)
-    
+
     if unaligned_transforms:
         # print('random shift')
         i_shift = random.randint(-10, 10)
@@ -71,7 +72,7 @@ def paired_data_transforms(img_1, img_2, unaligned_transforms=False):
         j += j_shift
 
     img_2 = F.crop(img_2, i, j, h, w)
-    
+
     return img_1,img_2
 
 
@@ -116,23 +117,23 @@ class CEILDataset(BaseDataset):
             t_img, r_img = paired_data_transforms(t_img, r_img)
         syn_model = self.syn_model
         t_img, r_img, m_img = syn_model(t_img, r_img)
-        
+
         B = to_tensor(t_img)
         R = to_tensor(r_img)
         M = to_tensor(m_img)
 
         return B, R, M
-        
+
     def __getitem__(self, index):
         index_B = index % len(self.B_paths)
         index_R = index % len(self.R_paths)
-        
+
         B_path = self.B_paths[index_B]
         R_path = self.R_paths[index_R]
-        
+
         t_img = Image.open(B_path).convert('RGB')
         r_img = Image.open(R_path).convert('RGB')
-    
+
         B, R, M = self.data_synthesis(t_img, r_img)
 
         fn = os.path.basename(B_path)
@@ -155,23 +156,23 @@ class CEILTestDataset(BaseDataset):
         self.unaligned_transforms = unaligned_transforms
         self.round_factor = round_factor
         self.flag = flag
-        
+
         if size is not None:
             self.fns = self.fns[:size]
 
     def __getitem__(self, index):
         fn = self.fns[index]
-        
+
         t_img = Image.open(join(self.datadir, 'transmission_layer', fn)).convert('RGB')
         m_img = Image.open(join(self.datadir, 'blended', fn)).convert('RGB')
-        
+
         if self.enable_transforms:
             t_img, m_img = paired_data_transforms(t_img, m_img, self.unaligned_transforms)
 
         B = to_tensor(t_img)
         M = to_tensor(m_img)
 
-        dic =  {'input': M, 'target_t': B, 'fn': fn, 'real':True, 'target_r': B} # fake reflection gt 
+        dic =  {'input': M, 'target_t': B, 'fn': fn, 'real':True, 'target_r': B} # fake reflection gt
         if self.flag is not None:
             dic.update(self.flag)
         return dic
@@ -182,6 +183,63 @@ class CEILTestDataset(BaseDataset):
         else:
             return len(self.fns)
 
+class MyDataset(BaseDataset):
+    def __init__(self, datadir, fns=None, size=None, enable_transforms=False, unaligned_transforms=False, round_factor=1, flag=None):
+        super(MyDataset, self).__init__()
+        self.size = size
+        self.datadir = datadir
+        self.enable_transforms = enable_transforms
+        self.unaligned_transforms = unaligned_transforms
+        self.round_factor = round_factor
+        self.flag = flag
+        if fns:
+            self.fns = fns
+        else:
+            self.fns = []
+            img_names = glob(datadir+'/*.npy')
+            img_names.sort()
+            mask_names = glob(datadir+'/mask' + '/*mask.png')
+            mask_names.sort()
+            for tmp_mask in mask_names:
+                tmp_M = datadir + '/IMG_' + tmp_mask[-18:-14] + '.npy'
+                tmp_R = datadir + '/IMG_' + tmp_mask[-13:-9] + '.npy'
+                if os.path.isfile(tmp_M) and os.path.isfile(tmp_R):
+                    self.fns.append([tmp_M,tmp_R,tmp_mask])
+                else:
+                    print(tmp_M, tmp_R, tmp_mask, 'not exist...')
+                    raise Exception('M/R/Mask not exist')
+            print("Data load succeed!")
+
+        if size is not None:
+            self.fns = self.fns[:size]
+
+    def __getitem__(self, index):
+        fn, r_name, mask = self.fns[index]
+
+        m_img = np.load(fn)[0,:,:,-1]# (1024, 1224) H*W
+        r_img = np.load(r_name)[0,:,:,-1]# (1024, 1224) H*W
+        t_img = m_img - r_img
+        # convert to PIL image
+        m_img = Image.fromarray(m_img.astype('uint8'), 'RGB')
+        t_img = Image.fromarray(t_img.astype('uint8'), 'RGB')
+
+
+        if self.enable_transforms:
+            t_img, m_img = paired_data_transforms(t_img, m_img, self.unaligned_transforms)
+
+        B = to_tensor(t_img)
+        M = to_tensor(m_img)
+
+        dic =  {'input': M, 'target_t': B, 'fn': fn, 'real':True, 'target_r': B} # fake reflection gt
+        if self.flag is not None:
+            dic.update(self.flag)
+        return dic
+
+    def __len__(self):
+        if self.size is not None:
+            return min(len(self.fns), self.size)
+        else:
+            return len(self.fns)
 
 class RealDataset(BaseDataset):
     def __init__(self, datadir, fns=None, size=None):
@@ -189,14 +247,14 @@ class RealDataset(BaseDataset):
         self.size = size
         self.datadir = datadir
         self.fns = fns or os.listdir(join(datadir))
-        
+
         if size is not None:
             self.fns = self.fns[:size]
-        
+
     def __getitem__(self, index):
         fn = self.fns[index]
         B = -1
-        
+
         m_img = Image.open(join(self.datadir, fn)).convert('RGB')
 
         M = to_tensor(m_img)
@@ -230,10 +288,10 @@ class PairedCEILDataset(CEILDataset):
         fn = self.fns[index]
         B_path = join(self.datadir, 'transmission_layer', fn)
         R_path = join(self.datadir, 'reflection_layer', fn)
-        
+
         t_img = Image.open(B_path).convert('RGB')
         r_img = Image.open(R_path).convert('RGB')
-    
+
         B, R, M = self.data_synthesis(t_img, r_img)
 
         data = {'input': M, 'target_t': B, 'target_r': R, 'fn': fn}
@@ -265,7 +323,7 @@ class FusionDataset(BaseDataset):
                 dataset = self.datasets[i]
                 return dataset[index%len(dataset)]
             residual -= ratio
-    
+
     def __len__(self):
         return self.size
 
@@ -273,16 +331,16 @@ class FusionDataset(BaseDataset):
 class RepeatedDataset(BaseDataset):
     def __init__(self, dataset, repeat=1):
         self.dataset = dataset
-        self.size = len(dataset) * repeat        
+        self.size = len(dataset) * repeat
         # self.reset()
 
     def reset(self):
-        
+
         self.dataset.reset()
 
     def __getitem__(self, index):
         dataset = self.dataset
         return dataset[index%len(dataset)]
-    
+
     def __len__(self):
         return self.size
